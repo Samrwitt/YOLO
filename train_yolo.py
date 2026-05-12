@@ -1,79 +1,146 @@
 #!/usr/bin/env python3
 """
-Train a YOLO detection model (Ultralytics YOLOv8 family).
+Train our **PyTorch YOLOv1-style** detector (`TinyYoloV1`) on PASCAL VOC 2007.
 
-Why a separate script from `train.py`?
-- LeNet solves *classification* (one label per image) on Fashion-MNIST.
-- YOLO solves *object detection* (bounding boxes + class ids). The loss, data labels,
-  and metrics (mAP) are different, so training goes through Ultralytics' battle-tested loop.
+This is the detection counterpart to `train.py` (LeNet on Fashion-MNIST): same framework
+(PyTorch), different task (bounding boxes + classes), different labels and loss.
 
-Before running:
-  pip install -r requirements.txt
+Example:
+  python train_yolo.py --data-root ./data --epochs 40 --batch-size 16
 
-Example (small built-in demo dataset, good for laptops):
-  python train_yolo.py --data coco128.yaml --model yolov8n.pt --epochs 30
-
-Use your own dataset by passing a YOLO-format `data.yaml` (paths, class names, train/val).
+The first run downloads VOC2007 into `--data-root` (can be several hundred MB).
 """
 
 from __future__ import annotations
 
 import argparse
+import json
+import time
 from pathlib import Path
+
+import torch
+from torch.utils.data import DataLoader
+from tqdm import tqdm
+
+from datasets import VocYoloGridDataset, voc_yolo_collate
+from datasets.voc_yolo import VOC_CLASSES
+from models.yolo_loss import YoloV1Loss
+from models.yolo_v1_tiny import TinyYoloV1
 
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Train YOLO (Ultralytics) for detection coursework.")
-    # `coco128.yaml` ships with Ultralytics — 128 COCO images for quick experiments.
-    p.add_argument(
-        "--data",
-        type=str,
-        default="coco128.yaml",
-        help="YOLO data YAML (built-in name like coco128.yaml, or path to your yaml).",
-    )
-    # Start from pretrained nano weights; faster convergence than training from scratch.
-    p.add_argument(
-        "--model",
-        type=str,
-        default="yolov8n.pt",
-        help="Checkpoint or architecture YAML, e.g. yolov8n.pt, yolov8s.pt, yolov8n.yaml.",
-    )
-    p.add_argument("--epochs", type=int, default=30)
-    p.add_argument("--imgsz", type=int, default=640, help="Square training image size.")
-    p.add_argument("--batch", type=int, default=16)
-    p.add_argument("--project", type=Path, default=Path("runs/detect"), help="Ultralytics project dir.")
-    p.add_argument("--name", type=str, default="yolo_train", help="Run name under project.")
-    p.add_argument("--device", type=str, default="", help="cuda, cpu, or 0,1,... (empty = auto).")
+    p = argparse.ArgumentParser(description="Train TinyYOLOv1 (PyTorch) on VOC2007.")
+    p.add_argument("--data-root", type=Path, default=Path("./data"), help="Root for VOC download (see torchvision VOC).")
+    p.add_argument("--run-dir", type=Path, default=Path("./runs/yolo"), help="Checkpoints + metrics.")
+    p.add_argument("--epochs", type=int, default=40)
+    p.add_argument("--batch-size", type=int, default=16)
+    p.add_argument("--lr", type=float, default=1e-3)
+    p.add_argument("--img-size", type=int, default=224, help="Must match backbone stride to grid (224 -> 7x7).")
+    p.add_argument("--grid", type=int, default=7, help="S in SxS YOLO grid.")
+    p.add_argument("--num-workers", type=int, default=4)
+    p.add_argument("--seed", type=int, default=42)
     return p.parse_args()
+
+
+def set_seed(seed: int) -> None:
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
+
+@torch.no_grad()
+def validate(model: torch.nn.Module, criterion: YoloV1Loss, loader: DataLoader, device: torch.device) -> float:
+    model.eval()
+    total = 0.0
+    n = 0
+    for imgs, gt, obj, cls in loader:
+        imgs = imgs.to(device, non_blocking=True)
+        gt = gt.to(device, non_blocking=True)
+        obj = obj.to(device, non_blocking=True)
+        cls = cls.to(device, non_blocking=True)
+        pred = model(imgs)
+        loss, _ = criterion(pred, gt, obj, cls)
+        total += float(loss.item())
+        n += 1
+    return total / max(n, 1)
 
 
 def main() -> None:
     args = parse_args()
+    set_seed(args.seed)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # Import here so `python train.py` (LeNet-only) does not require ultralytics.
-    from ultralytics import YOLO
+    train_ds = VocYoloGridDataset(args.data_root, "train", img_size=args.img_size, grid_size=args.grid)
+    val_ds = VocYoloGridDataset(args.data_root, "val", img_size=args.img_size, grid_size=args.grid)
 
-    # Load model graph + weights (or architecture yaml if training from scratch).
-    model = YOLO(args.model)
-
-    # `train()` handles augmentations, optimizer, loss (box + cls + dfl), validation mAP.
-    # `exist_ok` avoids crashing if you re-run the same experiment name in development.
-    model.train(
-        data=args.data,
-        epochs=args.epochs,
-        imgsz=args.imgsz,
-        batch=args.batch,
-        project=str(args.project),
-        name=args.name,
-        exist_ok=True,
-        device=args.device or None,
+    pin = torch.cuda.is_available()
+    train_loader = DataLoader(
+        train_ds,
+        batch_size=args.batch_size,
+        shuffle=True,
+        num_workers=args.num_workers,
+        collate_fn=voc_yolo_collate,
+        pin_memory=pin,
+    )
+    val_loader = DataLoader(
+        val_ds,
+        batch_size=args.batch_size,
+        shuffle=False,
+        num_workers=args.num_workers,
+        collate_fn=voc_yolo_collate,
+        pin_memory=pin,
     )
 
-    # After training, `model.trainer` holds paths Ultralytics used for this run.
-    trainer = getattr(model, "trainer", None)
-    save_dir = Path(trainer.save_dir) if trainer is not None else args.project / args.name
-    print(f"Training finished. Artifacts directory: {save_dir}")
-    print(f"Best weights (typical path): {save_dir / 'weights' / 'best.pt'}")
+    num_classes = len(VOC_CLASSES)
+
+    model = TinyYoloV1(num_classes=num_classes, grid_size=args.grid, in_ch=3).to(device)
+    criterion = YoloV1Loss(num_classes=num_classes).to(device)
+    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+
+    run_name = f"yolo_v1_tiny_{int(time.time())}"
+    run_path = args.run_dir / run_name
+    run_path.mkdir(parents=True, exist_ok=True)
+
+    best_val = float("inf")
+    history: list[dict] = []
+
+    for epoch in range(1, args.epochs + 1):
+        model.train()
+        running = 0.0
+        steps = 0
+        pbar = tqdm(train_loader, desc=f"epoch {epoch}/{args.epochs}")
+        for imgs, gt, obj, cls in pbar:
+            imgs = imgs.to(device, non_blocking=True)
+            gt = gt.to(device, non_blocking=True)
+            obj = obj.to(device, non_blocking=True)
+            cls = cls.to(device, non_blocking=True)
+
+            optimizer.zero_grad(set_to_none=True)
+            pred = model(imgs)
+            loss, parts = criterion(pred, gt, obj, cls)
+            loss.backward()
+            optimizer.step()
+
+            running += float(loss.item())
+            steps += 1
+            pbar.set_postfix(loss=f"{running/steps:.3f}", coord=float(parts["coord"]), cls=float(parts["cls"]))
+
+        train_loss = running / max(steps, 1)
+        val_loss = validate(model, criterion, val_loader, device)
+        row = {"epoch": epoch, "train_loss": train_loss, "val_loss": val_loss}
+        history.append(row)
+        print(f"Epoch {epoch:03d} | train {train_loss:.4f} | val {val_loss:.4f}")
+
+        if val_loss < best_val:
+            best_val = val_loss
+            ckpt = {"model": model.state_dict(), "epoch": epoch, "val_loss": val_loss, "args": vars(args)}
+            torch.save(ckpt, run_path / "best.pt")
+
+    with (run_path / "metrics.jsonl").open("w", encoding="utf-8") as f:
+        for row in history:
+            f.write(json.dumps(row) + "\n")
+
+    print(f"Done. Best val loss {best_val:.4f}. Checkpoints in {run_path}")
 
 
 if __name__ == "__main__":

@@ -1,28 +1,21 @@
 """
-YOLO (You Only Look Once) — single-stage object detection.
+YOLO (You Only Look Once) — context for this repository's **TinyYOLOv1** implementation.
 
-Motivation (high level):
-- Two-stage detectors (e.g. R-CNN family) first propose regions, then classify each region.
-  That pipeline is accurate but slower and more complex to train end-to-end at scale.
-- YOLO reframes detection as *dense prediction*: one CNN forward pass predicts many boxes
-  and class probabilities over a grid / feature pyramid, trading some localization nuance
-  for speed and simplicity.
+Where the code lives:
+- `yolo_v1_tiny.py` — convolutional backbone + 1×1 detection head, S×S grid, one box per cell.
+- `yolo_loss.py` — YOLOv1-style multi-part loss (coordinates, objectness, classification).
+- `../datasets/voc_yolo.py` — PASCAL VOC 2007 loading + assignment of GT boxes to grid cells.
+- `../train_yolo.py` / `../evaluate_yolo.py` — training and mAP@0.5 evaluation.
 
-Predecessors vs YOLO:
-- Classical CNNs like LeNet map an image to *one* label vector (classification). They do not
-  output spatial sets of boxes; extending them naively to many objects requires extra
-  structure (region proposals, anchors, etc.).
-- YOLO adds heads that predict box offsets and per-class scores at multiple scales (in
-  modern variants), with a backbone (CNN) shared across the image.
+Motivation vs region-based detectors:
+- Two-stage pipelines (proposals, then classifiers) can be accurate but heavier; YOLO frames
+  detection as dense prediction from one CNN pass.
 
-Innovations across YOLO generations (for your presentation):
-- YOLOv1: single network, S×S grid, limited small-object behavior.
-- Later versions: better backbones, anchor / anchor-free designs, feature pyramid networks,
-  improved loss (CIoU/DIoU), data augmentation (mosaic), and training efficiency.
+Relation to LeNet (`lenet.py`):
+- LeNet outputs a **single** class distribution for the whole image.
+- YOLO outputs **many** localized predictions (per grid cell), enabling multiple objects per image.
 
-This repository trains a *modern* YOLO implementation via the Ultralytics library
-(see `train_yolo.py`). The YAML/weights define the concrete depth-width schedule; your
-report should cite the exact variant (e.g. YOLOv8n) and discuss compute vs accuracy.
+Modern YOLO variants (v3–v8) add multi-scale heads, better anchors / anchor-free designs, and
+improved training tricks; this project keeps the original **single-scale grid** idea so the
+entire model fits in a small student codebase.
 """
-
-# Intentionally no heavy imports here — this module documents architecture for coursework.

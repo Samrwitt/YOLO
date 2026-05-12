@@ -1,4 +1,11 @@
 from .lenet import LeNet5
+from .yolo_loss import YoloV1Loss
+from .yolo_v1_tiny import TinyYoloV1, boxes_cxcywh_to_xyxy, decode_predictions
 
-# `yolo_architecture` is a documentation module (no symbols required for training).
-__all__ = ["LeNet5"]
+__all__ = [
+    "LeNet5",
+    "TinyYoloV1",
+    "YoloV1Loss",
+    "decode_predictions",
+    "boxes_cxcywh_to_xyxy",
+]
