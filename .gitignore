@@ -1,0 +1,8 @@
+.venv
+/data
+/docs/findings_presentation.pptx
+/runs
+/datasets
+/datasets/__pycache__
+/datasets/__init__.py
+/datasets/voc_yolo.py
