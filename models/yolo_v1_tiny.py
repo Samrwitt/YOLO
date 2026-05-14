@@ -1,19 +1,16 @@
 """
-Tiny YOLOv1-style detector in pure PyTorch (coursework-sized).
+Tiny YOLOv1-style detector — all PyTorch, sized so you can read it in one sitting.
 
-YOLOv1 (Redmon et al., 2016) divides the image into an S×S grid; each cell predicts
-B bounding boxes plus class scores. This file uses **one box per cell** (B=1) to keep
-the loss and target assignment readable, while preserving the core idea: **dense
-prediction in one forward pass** (no region-proposal stage like R-CNN).
+Original YOLO (Redmon et al., 2016) chops the image into an S×S grid and has each cell spit
+out bounding boxes + class scores in a single forward pass. We use **one box per cell** so
+the training code stays short; you still get the "dense detection" idea without drowning in
+anchor bookkeeping.
 
-Compared to LeNet (`lenet.py`):
-- LeNet maps the whole image to a **single** class vector.
-- YOLO maps a spatial grid to **many** (box + class) vectors at once, suited to
-  multiple objects and localization.
+LeNet (`lenet.py`) gives you one label for the whole image. This network hands you a small
+tensor of predictions per cell — that's the big conceptual jump for detection.
 
-The backbone is a small Darknet-like stack (conv + maxpool) ending at S×S; a 1×1 head
-emits (5 + num_classes) channels per cell: offsets for center within the cell, size,
-objectness, and class logits.
+Backbone: a shallow conv stack (think "baby Darknet"). Head: 1×1 conv to 5 + num_classes
+channels per cell (center offsets, size, objectness, then class logits).
 """
 
 from __future__ import annotations
@@ -22,15 +19,14 @@ from typing import Tuple
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 
 class TinyYoloV1(nn.Module):
     """
-    Backbone: repeated conv → maxpool until spatial size is `grid`×`grid`.
+    Stack conv blocks + pooling until the activation map is S×S, then a 1×1 head.
 
-    Head: 1×1 convolution mapping C channels to `5 + num_classes` outputs per cell.
-    Raw outputs are interpreted by `decode_predictions` (sigmoid / exp + grid).
+    `decode_predictions` turns the raw head output into cx, cy, w, h in normalized image
+    coords plus a confidence score and class logits.
     """
 
     def __init__(self, num_classes: int = 20, grid_size: int = 7, in_ch: int = 3) -> None:
@@ -48,7 +44,7 @@ class TinyYoloV1(nn.Module):
                 nn.LeakyReLU(0.1, inplace=True),
             )
 
-        # Input is fixed square (default 224). Stride to grid: 224 / 7 = 32 (four pools of 2).
+        # With 224×224 input: first layer uses stride 2, then four 2×2 pools → 224 / (2×2^4) = 7×7 cells.
         self.net = nn.Sequential(
             conv_block(in_ch, 16, k=7, s=2, p=3),
             nn.MaxPool2d(2),
@@ -76,7 +72,7 @@ class TinyYoloV1(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
-        Returns tensor of shape (N, 5 + C, S, S) — raw logits / pre-activations for head.
+        Returns (N, 5 + C, S, S) — raw head activations before the loss pulls them apart.
         """
         out = self.net(x)
         if out.shape[2] != self.S or out.shape[3] != self.S:
@@ -88,7 +84,8 @@ class TinyYoloV1(nn.Module):
 
 
 def _make_grid(S: int, device: torch.device, dtype: torch.dtype) -> Tuple[torch.Tensor, torch.Tensor]:
-    # Cell indices: gy along height (rows), gx along width (cols), matching (i,j) in image space.
+    # gx, gy are just 0..S-1 repeated — we add them to sigmoid(tx), sigmoid(ty) so each cell
+    # predicts a small offset *inside* its cell instead of the whole image at once.
     gy, gx = torch.meshgrid(
         torch.arange(S, device=device, dtype=dtype),
         torch.arange(S, device=device, dtype=dtype),
@@ -99,16 +96,14 @@ def _make_grid(S: int, device: torch.device, dtype: torch.dtype) -> Tuple[torch.
 
 def decode_predictions(pred: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """
-    pred: (N, 5+C, S, S) -> per-cell decoded quantities in **normalized image coordinates** [0,1].
+    pred: (N, 5+C, S, S) → decoded boxes in **normalized** [0,1] image coordinates.
 
-    Decoding (YOLOv1 spirit):
-    - Center (cx, cy) = (sigmoid(tx) + gx) / S, (sigmoid(ty) + gy) / S with gx,gy cell indices.
-    - Width/height as fractions of image: exp(tw)/S, exp(th)/S (stabilized with clamp).
-    - Objectness: sigmoid(tobj).
-    - Classes: raw logits for softmax/CE in the loss.
+    The math is the YOLOv1 flavor: sigmoid on center offsets, add cell index, divide by S;
+    exp on log-size (clamped so nothing explodes); sigmoid on objectness; class logits stay
+    logits for cross-entropy in the loss.
     """
     N, _, S, _ = pred.shape
-    pred = pred.permute(0, 2, 3, 1).contiguous()  # (N, S, S, 5+C)
+    pred = pred.permute(0, 2, 3, 1).contiguous()  # (N, S, S, 5+C) — easier to read
     tx, ty, tw, th, tobj = pred[..., 0], pred[..., 1], pred[..., 2], pred[..., 3], pred[..., 4]
     tcls = pred[..., 5:]
 
@@ -125,7 +120,7 @@ def decode_predictions(pred: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, 
 
 
 def boxes_cxcywh_to_xyxy(cx: torch.Tensor, cy: torch.Tensor, w: torch.Tensor, h: torch.Tensor) -> torch.Tensor:
-    """All in normalized [0,1] coords; returns (..., 4) as xmin, ymin, xmax, ymax."""
+    """cxcywh in [0,1] → corners xmin, ymin, xmax, ymax (still normalized)."""
     x1 = cx - w / 2
     y1 = cy - h / 2
     x2 = cx + w / 2

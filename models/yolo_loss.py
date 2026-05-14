@@ -1,13 +1,15 @@
 """
-YOLOv1-style combined loss (coordinate + objectness + classification).
+Loss for our tiny YOLOv1-style head — three pieces that get added together.
 
-This mirrors the original paper's intent:
-- Penalize box errors only on cells that contain an object's center (responsible cells).
-- Down-weight background cells for objectness so the network is not drowned by negatives.
-- Train class probabilities only where an object is present.
+1) Box term: only on cells where we actually placed a ground-truth object (the "responsible"
+   cell for that object). Smooth L1 on decoded cx, cy, w, h vs the target.
+2) Objectness: should the network think there's an object here? BCE-with-logits on the raw
+   score — 1 on object cells, 0 elsewhere, but empty cells are scaled down by lambda_noobj
+   so they don't overwhelm the loss.
+3) Classes: plain cross-entropy on the logits, again only on cells that have an object.
 
-Objectness uses `binary_cross_entropy_with_logits` on the raw score (stable). Box and class
-terms use decoded boxes / class logits from `decode_predictions`.
+We use `binary_cross_entropy_with_logits` on objectness so we never apply sigmoid twice.
+Box/class terms use `decode_predictions` so we're comparing apples to apples in image space.
 """
 
 from __future__ import annotations
@@ -34,10 +36,10 @@ class YoloV1Loss(nn.Module):
         cls_target: torch.Tensor,
     ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
         """
-        pred: (N, 5+C, S, S) raw head outputs.
-        gt_box: (N, S, S, 4) normalized cx, cy, w, h (zeros where no object).
-        obj_mask: (N, S, S) float/bool 1 where a ground-truth center falls in the cell.
-        cls_target: (N, S, S) long class index in [0, C-1] (ignored where obj_mask==0).
+        pred — raw network output (N, 5+C, S, S).
+        gt_box — (N, S, S, 4) with cx,cy,w,h in [0,1]; zeros where there's nothing to predict.
+        obj_mask — 1 where a GT center landed in that cell, else 0.
+        cls_target — class index per cell; values in empty cells are ignored.
         """
         cx, cy, w, h, conf, tcls = decode_predictions(pred)
         obj = obj_mask.float()
@@ -47,7 +49,7 @@ class YoloV1Loss(nn.Module):
         coord_err = F.smooth_l1_loss(pred_box, gt_box, reduction="none").sum(dim=-1)
         loss_coord = (obj * coord_err).sum() / obj.sum().clamp(min=1.0)
 
-        # Raw objectness logits live in channel index 4 before sigmoid.
+        # Channel 4 is objectness *before* sigmoid — feed that straight into BCEWithLogits
         tobj_raw = pred.permute(0, 2, 3, 1).contiguous()[..., 4]
         loss_obj = (obj * F.binary_cross_entropy_with_logits(tobj_raw, torch.ones_like(tobj_raw), reduction="none")).sum()
         loss_obj = loss_obj / obj.sum().clamp(min=1.0)

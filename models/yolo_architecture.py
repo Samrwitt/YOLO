@@ -1,21 +1,19 @@
 """
-YOLO (You Only Look Once) — context for this repository's **TinyYOLOv1** implementation.
+Quick map of where our YOLO-ish detector lives (everything is plain PyTorch).
 
-Where the code lives:
-- `yolo_v1_tiny.py` — convolutional backbone + 1×1 detection head, S×S grid, one box per cell.
-- `yolo_loss.py` — YOLOv1-style multi-part loss (coordinates, objectness, classification).
-- `../datasets/voc_yolo.py` — PASCAL VOC 2007 loading + assignment of GT boxes to grid cells.
-- `../notebooks/yolo_train_eval.ipynb` — training and mAP@0.5 evaluation (inline in notebook).
+- `yolo_v1_tiny.py` — the actual network: conv stack, then a 1×1 head that outputs an S×S
+  grid of (box stuff + objectness + class logits).
+- `yolo_loss.py` — turns predictions + VOC targets into a single scalar loss.
+- `datasets/voc_yolo.py` — downloads / reads VOC2007 and builds tensors the loss expects.
 
-Motivation vs region-based detectors:
-- Two-stage pipelines (proposals, then classifiers) can be accurate but heavier; YOLO frames
-  detection as dense prediction from one CNN pass.
+Training + mAP eval are in `notebooks/yolo_train_eval.ipynb` so you can run end-to-end in one place.
 
-Relation to LeNet (`lenet.py`):
-- LeNet outputs a **single** class distribution for the whole image.
-- YOLO outputs **many** localized predictions (per grid cell), enabling multiple objects per image.
+Why people cared about YOLO: older detectors often ran a classifier on thousands of proposed
+regions — slow and fiddly. YOLO said "predict boxes and classes everywhere in one shot."
 
-Modern YOLO variants (v3–v8) add multi-scale heads, better anchors / anchor-free designs, and
-improved training tricks; this project keeps the original **single-scale grid** idea so the
-entire model fits in a small student codebase.
+LeNet in `lenet.py` is the opposite problem setup: one image → one label vector. Here it's
+one image → a whole field of predictions, which is what you need when multiple objects show up.
+
+We deliberately stay on a **single** grid (old-school YOLOv1 vibe). Real modern YOLOs stack
+pyramids, better matching, fancier augmentations, etc. — way more code than we want for a lab.
 """
