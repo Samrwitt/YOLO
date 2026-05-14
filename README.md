@@ -5,8 +5,6 @@ This repository contains **two CNN architectures** implemented in **PyTorch**:
 - **LeNet-5 (1998)** — image classification on **Fashion-MNIST**
 - **YOLO (2016 / YOLOv1-style)** — single-stage object detection on **PASCAL VOC 2007**
 
-Both implementations are designed for coursework: readable, well-annotated, and runnable end-to-end.
-
 ## Setup
 
 Create a virtual environment (recommended) and install dependencies:
@@ -35,21 +33,14 @@ Outputs:
 - Checkpoint: `runs/yolo/yolo_v1_tiny_<timestamp>/best.pt`
 - Metrics: `runs/yolo/yolo_v1_tiny_<timestamp>/metrics.jsonl`
 
-## Plots (for report / presentation)
+## Plots
 
 Each notebook ends with a **Plot training curves** section that reads `metrics.jsonl`, saves PNGs under `runs/figures/`, and displays plots inline.
 
-## Background writeups (assignment deliverable)
+## deliverables
 
 - `docs/lenet5.md` — LeNet-5 motivation, predecessors, innovations, tradeoffs
 - `docs/yolo_v1.md` — YOLO (2016 / v1-style) motivation, predecessors vs R-CNN, innovations, tradeoffs
-
-## Findings (after running notebooks)
-
-- Written report: `docs/assignment_findings.md`
-- Slides: `docs/findings_presentation.pptx` (create or refresh with `python scripts/generate_findings_slides.py` after `pip install python-pptx`)
-
-Model code lives under `models/`; VOC helpers under `datasets/`. Datasets download/cache under `data/` when you run the notebooks.
 
 ---
 
