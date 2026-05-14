@@ -50,4 +50,4 @@ The original YOLOv1 predicts **\(S \times S\)** grid outputs with **\(B\)** boxe
 This coursework implementation keeps the original *single-stage grid formulation* but uses **one box per cell** (B=1) to keep target assignment and loss readable while preserving the key idea: **detect in one forward pass** (no region proposals).
 
 ---
-BY Lamrot Ibsa, Ruhama Yohannes amd Samrawit Kahsay
+BY Lamrot Ibsa, Ruhama Yohannes and Samrawit Kahsay
