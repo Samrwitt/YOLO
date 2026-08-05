@@ -1,6 +1,6 @@
-# Assignment 3 — Deep Learning for Computer Vision
+Deep Learning for Computer Vision
 
-This repository compares **two CNN architectures** implemented in **PyTorch**:
+This project compares **two CNN architectures** implemented in **PyTorch**:
 
 - **LeNet-5 (1998)** — image classification on **Fashion-MNIST**
 - **YOLO (2016 / YOLOv1-style)** — single-stage object detection on **PASCAL VOC 2007**
